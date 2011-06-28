@@ -7,6 +7,7 @@ util = require('util')
 path = require('path')
 utils = require('./utils')
 file_utils = require('./utils/file')
+asset = require('./asset')
 
 # Initialize SocketStream. This must always be run to set the basic environment
 exports.init = (load_project = false) ->
@@ -23,6 +24,7 @@ exports.init = (load_project = false) ->
     models:           {}              # Models are preloaded and placed here
     server:           {}              # Server code is preloaded and placed here
     shared:           {}              # Shared code is preloaded and placed here
+    process:          {}              # Used to store process information
 
   # Set root dir
   SS.root = fs.realpathSync()
@@ -90,7 +92,23 @@ exports.start =
   server: ->
     util.log('Starting SocketStream server...')
     load.project()
-    servers = require('./server.coffee').start()
+    sc = require('./server.coffee')
+    servers = sc.init()
+    
+    if (servers.primary.config.port < 1024) or (servers.secondary and servers.secondary.config.port < 1024) and process.getuid() != 0
+      util.log("Binding to ports < 1024 requires root privileges")
+      process.exit(1)
+
+    # Start processes
+    SS.process = sc.start()
+    
+    asset.init() if SS.process.isMaster
+
+    # Drop privileges if running as root
+    if process.getuid() == 0 and SS.config.process.user
+      util.log('Switching to user "' + SS.config.process.user + '"')
+      process.setuid(SS.config.process.user)
+      
     SS.users.online.update() if SS.config.users.online.enabled
     text = ["Primary server running on #{formatProtocol(servers.primary.protocol)}://#{servers.primary.config.hostname}:#{servers.primary.config.port}"]
     text.push "  Secondary server running on #{formatProtocol(servers.secondary.protocol)}://#{servers.secondary.config.hostname}:#{servers.secondary.config.port}" if servers.secondary

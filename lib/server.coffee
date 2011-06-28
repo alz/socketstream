@@ -5,11 +5,11 @@
 fs = require('fs')
 util = require('util')
 http = require('http')
+nodes = require('multi-node')
 
 # Load mandatory modules
 session         = require('./session.coffee')
 Request         = require('./request.coffee')
-asset           = require('./asset')
 pubsub          = require('./pubsub.coffee')
 http_middleware = require('./http_middleware')
 utils           = require('./utils/server.coffee')
@@ -22,23 +22,12 @@ RTM = require('./realtime_models') if SS.config.rtm.enabled
 
 # Define servers
 servers = {}
+processes = {}
 
-# The main method called when starting the server ('socketstream start')
-exports.start = ->
-  
-  asset.init()
-  
-  # Start Primary Server (either HTTP or HTTPS)
+exports.init = ->
+  # Set up configuration
   servers.primary = primaryServer()
-  socket = SS.libs.io.listen(servers.primary.server, {transports: ['websocket', 'flashsocket']})
-  socket.on('connection', process.socket.connection)
-  socket.on('clientMessage', process.socket.call)
-  socket.on('clientDisconnect', process.socket.disconnection)
-  servers.primary.server.listen(servers.primary.config.port, servers.primary.config.hostname)
-  pubsub.listen(socket)
   
-  # Start Secondary HTTP Redirect/API server (if running HTTPS)
-  # We will architect this way better in the near future
   if SS.config.https.enabled and SS.config.https.domain and SS.config.https.redirect_http
     request_processor = (request, response) -> process.http.request(request, response, 'secondary')
     servers.secondary =
@@ -46,10 +35,39 @@ exports.start = ->
       middleware: http_middleware.secondary()
       config:     SS.config.http
       protocol:   'http'
-    servers.secondary.server.listen(servers.secondary.config.port, servers.secondary.config.hostname)
-
+  
   servers
+  
+# The main method called when starting the server ('socketstream start')
+exports.start = ->
+    
+  # Bind Socket.IO
+  socket = SS.libs.io.listen(servers.primary.server, {transports: ['websocket', 'flashsocket']})
+  socket.on('connection', process.socket.connection)
+  socket.on('clientMessage', process.socket.call)
+  socket.on('clientDisconnect', process.socket.disconnection)
+  pubsub.listen(socket)
+    
+  processes.primary = nodes.listen({
+    port: servers.primary.config.port
+    nodes: SS.config.process.primary_count || 1
+    host: servers.primary.config.hostname
+    masterListen: false
+  }, servers.primary.server)
 
+
+  # Start Secondary HTTP Redirect/API server (if running HTTPS)
+  # We will architect this way better in the near future
+  if servers.secondary and servers.secondary.config
+    processes.secondary = nodes.listen({
+      port: servers.secondary.config.port
+      nodes: SS.config.process.secondary_count || 1
+      host: servers.secondary.hostname
+      masterListen: false
+    }, servers.secondary.server)
+
+  processes
+  
 # PRIVATE
 
 process =

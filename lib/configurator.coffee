@@ -36,6 +36,12 @@ setDefaults = ->
       ensure_domain:          true            # if set, will auto-redirect traffic sent to different hosts to the domain specified above
       redirect_http:          true            # automatically redirects requests to http:// to https://#{host}  Host must be set
 
+    process:
+      user:                   "socketstream"
+      primary_count:          1
+      secondary_count:        1
+      auto_restart:           true
+      
     # Logger (only to the terminal for now)
     log:
       level:                  3         	    # 0 = none, 1 = calls only, 2 = calls + params, 3 = full, 4 = everything
